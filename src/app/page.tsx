@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, memo, useRef } from "react";
+import { useState, useEffect, useMemo, memo, useRef, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -62,7 +62,8 @@ const getTemperatureColor = (
   min: number,
   max: number
 ): string => {
-  const normalized = (temp - min) / (max - min);
+  const normalized = Math.max(0, Math.min(1, (temp - min) / (max - min)));
+
   if (normalized < 0.25) {
     const b = Math.floor(normalized * 4 * 255);
     return `rgb(0, ${b}, 255)`;
@@ -94,8 +95,6 @@ const getStatusIcon = (status: MqttStatus) => {
 };
 
 // --- SUB-COMPONENTS ---
-
-// Clean Stat Card
 interface StatCardProps {
   title: string;
   value: string | number;
@@ -105,48 +104,47 @@ interface StatCardProps {
   isLoading: boolean;
 }
 
-const StatCard = ({
-  title,
-  value,
-  description,
-  icon,
-  trend,
-  isLoading,
-}: StatCardProps) => (
-  <Card className="border border-gray-200 bg-white hover:shadow-sm transition-shadow duration-200">
-    <CardContent className="p-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
-            {icon}
-            <span>{title}</span>
+const StatCard = memo(
+  ({ title, value, description, icon, trend, isLoading }: StatCardProps) => (
+    <Card className="border border-gray-200 bg-white hover:shadow-sm transition-shadow duration-200">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
+              {icon}
+              <span>{title}</span>
+            </div>
+            {isLoading ? (
+              <Skeleton className="h-8 w-20 bg-gray-100" />
+            ) : (
+              <div className="text-2xl font-bold text-gray-900">{value}</div>
+            )}
+            {description && (
+              <p className="text-xs text-gray-500">{description}</p>
+            )}
           </div>
-          {isLoading ? (
-            <Skeleton className="h-8 w-20 bg-gray-100" />
-          ) : (
-            <div className="text-2xl font-bold text-gray-900">{value}</div>
-          )}
-          {description && (
-            <p className="text-xs text-gray-500">{description}</p>
+          {trend && (
+            <div className="flex items-center">
+              {trend === "up" && (
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+              )}
+              {trend === "down" && (
+                <TrendingDown className="w-4 h-4 text-red-600" />
+              )}
+              {trend === "stable" && (
+                <Minus className="w-4 h-4 text-gray-400" />
+              )}
+            </div>
           )}
         </div>
-        {trend && (
-          <div className="flex items-center">
-            {trend === "up" && (
-              <TrendingUp className="w-4 h-4 text-emerald-600" />
-            )}
-            {trend === "down" && (
-              <TrendingDown className="w-4 h-4 text-red-600" />
-            )}
-            {trend === "stable" && <Minus className="w-4 h-4 text-gray-400" />}
-          </div>
-        )}
-      </div>
-    </CardContent>
-  </Card>
+      </CardContent>
+    </Card>
+  )
 );
 
-// Clean Heatmap
+StatCard.displayName = "StatCard";
+
+// --- HEATMAP COMPONENT ---
 interface ThermalHeatmapProps {
   data: number[][];
   stats: ThermalStatistics;
@@ -160,11 +158,12 @@ const ThermalHeatmap = memo(
     const rows = data.length;
     const cols = data[0]?.length || 0;
 
+    // Optimized heatmap generation
     const heatmapGrid = useMemo(() => {
       return data.flat().map((temp, index) => (
         <div
           key={index}
-          className="w-full h-full"
+          className="w-full h-full border-0"
           style={{
             backgroundColor: getTemperatureColor(temp, min_temp, max_temp),
           }}
@@ -187,29 +186,29 @@ const ThermalHeatmap = memo(
             {heatmapGrid}
           </div>
 
-          {/* Clean Overlays */}
+          {/* Overlays */}
           <div className="absolute top-3 left-3 space-y-2">
-            <div className="bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-medium">
+            <div className="bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-bold">
               Max: {max_temp.toFixed(1)}°C
             </div>
-            <div className="bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-medium">
+            <div className="bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-bold">
               Min: {min_temp.toFixed(1)}°C
             </div>
           </div>
 
           <div className="absolute top-3 right-3">
-            <div className="bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-medium">
+            <div className="bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-bold">
               Frame #{frameCount}
             </div>
           </div>
 
           <div className="absolute bottom-3 left-3">
-            <div className="bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-medium">
+            <div className="bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-bold">
               Avg: {avg_temp.toFixed(1)}°C
             </div>
           </div>
 
-          <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-medium">
+          <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-black/70 backdrop-blur-sm rounded px-2 py-1 text-white text-xs font-bold">
             <Clock className="w-3 h-3" />
             {lastUpdate}
           </div>
@@ -230,8 +229,8 @@ const ThermalHeatmap = memo(
 
 ThermalHeatmap.displayName = "ThermalHeatmap";
 
-// Clean Loading Placeholder
-const HeatmapPlaceholder = () => (
+// Loading Placeholder
+const HeatmapPlaceholder = memo(() => (
   <div className="aspect-video bg-gray-100 rounded-lg flex items-center justify-center">
     <div className="text-center text-gray-500">
       <Wifi className="h-12 w-12 mx-auto mb-3 text-gray-400" />
@@ -241,9 +240,11 @@ const HeatmapPlaceholder = () => (
       </p>
     </div>
   </div>
-);
+));
 
-// Clean Info Panel
+HeatmapPlaceholder.displayName = "HeatmapPlaceholder";
+
+// Info Panel Component
 interface InfoPanelProps {
   stats: ThermalStatistics | null;
   device: Pick<
@@ -255,127 +256,127 @@ interface InfoPanelProps {
   fps: number;
 }
 
-const InfoPanel = ({
-  stats,
-  device,
-  mqttStatus,
-  lastUpdate,
-  fps,
-}: InfoPanelProps) => (
-  <div className="space-y-6">
-    {/* Live Statistics */}
-    <Card className="border border-gray-200 bg-white">
-      <CardHeader className="pb-4">
-        <CardTitle className="text-lg flex items-center gap-2 text-gray-900">
-          <Activity className="w-5 h-5 text-gray-600" />
-          Live Statistics
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-center">
-            <p className="text-xs font-medium text-blue-700 mb-1">MIN TEMP</p>
-            <p className="text-xl font-bold text-blue-900">
-              {stats ? `${stats.min_temp.toFixed(1)}°C` : "--"}
+const InfoPanel = memo(
+  ({ stats, device, mqttStatus, lastUpdate, fps }: InfoPanelProps) => (
+    <div className="space-y-6">
+      {/* Live Statistics */}
+      <Card className="border border-gray-200 bg-white">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg flex items-center gap-2 text-gray-900">
+            <Activity className="w-5 h-5 text-gray-600" />
+            Live Statistics
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-center">
+              <p className="text-xs font-medium text-blue-700 mb-1">MIN TEMP</p>
+              <p className="text-xl font-bold text-blue-900">
+                {stats ? `${stats.min_temp.toFixed(1)}°C` : "--"}
+              </p>
+            </div>
+            <div className="bg-red-50 border border-red-100 rounded-lg p-3 text-center">
+              <p className="text-xs font-medium text-red-700 mb-1">MAX TEMP</p>
+              <p className="text-xl font-bold text-red-900">
+                {stats ? `${stats.max_temp.toFixed(1)}°C` : "--"}
+              </p>
+            </div>
+          </div>
+          <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-4 text-center">
+            <p className="text-xs font-medium text-emerald-700 mb-1">AVERAGE</p>
+            <p className="text-2xl font-bold text-emerald-900">
+              {stats ? `${stats.avg_temp.toFixed(1)}°C` : "--"}
             </p>
           </div>
-          <div className="bg-red-50 border border-red-100 rounded-lg p-3 text-center">
-            <p className="text-xs font-medium text-red-700 mb-1">MAX TEMP</p>
-            <p className="text-xl font-bold text-red-900">
-              {stats ? `${stats.max_temp.toFixed(1)}°C` : "--"}
-            </p>
-          </div>
-        </div>
-        <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-4 text-center">
-          <p className="text-xs font-medium text-emerald-700 mb-1">AVERAGE</p>
-          <p className="text-2xl font-bold text-emerald-900">
-            {stats ? `${stats.avg_temp.toFixed(1)}°C` : "--"}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
 
-    {/* System Info */}
-    <Card className="border border-gray-200 bg-white">
-      <CardHeader className="pb-4">
-        <CardTitle className="text-lg flex items-center gap-2 text-gray-900">
-          <Server className="w-5 h-5 text-gray-600" />
-          System Info
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Connection Status */}
-        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-          <div className="flex items-center gap-2">
-            {getStatusIcon(mqttStatus)}
-            <span className="text-sm font-medium text-gray-700">
-              MQTT Status
+      {/* System Info */}
+      <Card className="border border-gray-200 bg-white">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg flex items-center gap-2 text-gray-900">
+            <Server className="w-5 h-5 text-gray-600" />
+            System Info
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Connection Status */}
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center gap-2">
+              {getStatusIcon(mqttStatus)}
+              <span className="text-sm font-medium text-gray-700">
+                MQTT Status
+              </span>
+            </div>
+            <span
+              className={`text-sm font-medium ${
+                mqttStatus === "connected"
+                  ? "text-emerald-600"
+                  : mqttStatus === "connecting"
+                  ? "text-amber-600"
+                  : "text-red-600"
+              }`}
+            >
+              {mqttStatus.charAt(0).toUpperCase() + mqttStatus.slice(1)}
             </span>
           </div>
-          <span
-            className={`text-sm font-medium ${
-              mqttStatus === "connected"
-                ? "text-emerald-600"
-                : mqttStatus === "connecting"
-                ? "text-amber-600"
-                : "text-red-600"
-            }`}
-          >
-            {mqttStatus.charAt(0).toUpperCase() + mqttStatus.slice(1)}
-          </span>
-        </div>
 
-        {/* FPS Display */}
-        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-          <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-gray-600" />
-            <span className="text-sm font-medium text-gray-700">
-              Frame Rate
-            </span>
+          {/* FPS Display */}
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Eye className="w-4 h-4 text-gray-600" />
+              <span className="text-sm font-medium text-gray-700">
+                Frame Rate
+              </span>
+            </div>
+            <span className="text-sm font-medium text-gray-900">{fps} FPS</span>
           </div>
-          <span className="text-sm font-medium text-gray-900">{fps} FPS</span>
-        </div>
 
-        <Separator className="my-3" />
+          <Separator className="my-3" />
 
-        {/* Device Details */}
-        <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-600">Device ID</span>
-            <span className="text-sm font-mono bg-gray-100 px-2 py-1 rounded text-gray-900">
-              {device?.device_id || <Skeleton className="h-4 w-20" />}
-            </span>
+          {/* Device Details */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-600">Device ID</span>
+              <span className="text-sm font-mono bg-gray-100 px-2 py-1 rounded text-gray-900">
+                {device?.device_id || <Skeleton className="h-4 w-20" />}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-600">Location</span>
+              <span className="text-sm font-medium text-gray-900">
+                {device?.location || <Skeleton className="h-4 w-16" />}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-600">Interface</span>
+              <span className="text-sm font-medium text-gray-900">
+                {device?.interface || <Skeleton className="h-4 w-12" />}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-600">Resolution</span>
+              <span className="text-sm font-medium text-gray-900">
+                {device?.metadata.resolution || (
+                  <Skeleton className="h-4 w-14" />
+                )}
+              </span>
+            </div>
           </div>
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-600">Location</span>
-            <span className="text-sm font-medium text-gray-900">
-              {device?.location || <Skeleton className="h-4 w-16" />}
-            </span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-600">Interface</span>
-            <span className="text-sm font-medium text-gray-900">
-              {device?.interface || <Skeleton className="h-4 w-12" />}
-            </span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-600">Resolution</span>
-            <span className="text-sm font-medium text-gray-900">
-              {device?.metadata.resolution || <Skeleton className="h-4 w-14" />}
-            </span>
-          </div>
-        </div>
 
-        <Separator className="my-3" />
+          <Separator className="my-3" />
 
-        <div className="flex items-center justify-between text-xs text-gray-500 bg-gray-50 p-2 rounded">
-          <span>Last Update</span>
-          <span className="font-mono">{lastUpdate || "N/A"}</span>
-        </div>
-      </CardContent>
-    </Card>
-  </div>
+          <div className="flex items-center justify-between text-xs text-gray-500 bg-gray-50 p-2 rounded">
+            <span>Last Update</span>
+            <span className="font-mono">{lastUpdate || "N/A"}</span>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
 );
+
+InfoPanel.displayName = "InfoPanel";
 
 // --- MAIN DASHBOARD COMPONENT ---
 export default function DashboardPage() {
@@ -384,54 +385,97 @@ export default function DashboardPage() {
   const [lastUpdate, setLastUpdate] = useState<string>("");
   const [fps, setFps] = useState<number>(0);
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [frameLimit, setFrameLimit] = useState<number>(5);
+  const [autoReset, setAutoReset] = useState<boolean>(true);
 
-  // FPS Control - 1 FPS limit
+  // Performance optimization
   const lastFrameTime = useRef<number>(0);
-  const frameInterval = 1000; // 1000ms = 1 FPS
+  const frameInterval = useMemo(() => 1000 / frameLimit, [frameLimit]);
+  const fpsCounter = useRef<number[]>([]);
 
+  // Frame counter reset
+  const resetFrameCounter = useCallback(() => {
+    if (thermalData) {
+      setThermalData((prev) =>
+        prev
+          ? {
+              ...prev,
+              frame_count: 1,
+            }
+          : null
+      );
+    }
+    console.log("Frame counter reset to 1");
+  }, [thermalData]);
+
+  // Auto reset when frame reaches 100
+  useEffect(() => {
+    if (autoReset && thermalData && thermalData.frame_count >= 100) {
+      resetFrameCounter();
+    }
+  }, [thermalData?.frame_count, autoReset, resetFrameCounter]);
+
+  // FIXED MQTT SETUP - NO DISCONNECT
   useEffect(() => {
     const mqttClient = getMQTTClient();
 
     const initializeMQTT = async () => {
       try {
+        setMqttStatus("connecting");
         await mqttClient.connect();
         setMqttStatus("connected");
         mqttClient.subscribe("sensors/thermal_stream");
       } catch (error) {
-        console.error("MQTT connection failed:", error);
+        console.error("Dashboard: MQTT connection failed:", error);
+        setMqttStatus("disconnected");
+        // Retry after 5 seconds
+        setTimeout(() => {
+          initializeMQTT();
+        }, 5000);
+      }
+    };
+
+    // Connection status checker
+    const checkConnection = () => {
+      const isConnected = mqttClient.isConnected();
+      const isConnecting = mqttClient.isConnecting();
+
+      if (isConnecting && mqttStatus !== "connecting") {
+        setMqttStatus("connecting");
+      } else if (isConnected && mqttStatus !== "connected") {
+        setMqttStatus("connected");
+      } else if (!isConnected && !isConnecting && mqttStatus === "connected") {
         setMqttStatus("disconnected");
       }
     };
 
-    initializeMQTT();
-
     const handleMQTTMessage = (event: CustomEvent) => {
       const { topic, payload } = event.detail;
-      if (topic === "sensors/thermal_stream") {
+      if (topic === "sensors/thermal_stream" && !isPaused) {
         const currentTime = Date.now();
 
-        // FPS Control - only update if enough time has passed and not paused
-        if (isPaused || currentTime - lastFrameTime.current < frameInterval) {
-          return; // Skip this frame
+        // FPS Control
+        if (currentTime - lastFrameTime.current < frameInterval) {
+          return; // Skip frame
         }
 
         try {
           const data = JSON.parse(payload);
 
-          // Handle different payload structures
+          // Process thermal data
           const thermalData: ThermalData = {
-            device_id: data.device_id || "thermal_cam_rpi1",
-            device_name: data.device_name || "Thermal Camera RPi1",
-            location: data.location || "Room A",
-            interface: data.interface || "spi",
+            device_id: data.device_id || "thermal_cam_rpi2",
+            device_name: data.device_name || "Thermal Camera USB",
+            location: data.location || "Container",
+            interface: data.interface || "usb",
             frame_count:
               data.thermal_data?.frame_count || data.frame_count || 0,
             thermal_data: {
               raw_array: [],
               statistics: data.thermal_data?.statistics || {
-                min_temp: 0,
-                max_temp: 0,
-                avg_temp: 0,
+                min_temp: 20,
+                max_temp: 30,
+                avg_temp: 25,
                 total_pixels: 4960,
               },
             },
@@ -441,9 +485,9 @@ export default function DashboardPage() {
             },
           };
 
-          // Reshape flat array to 62x80 grid
+          // Reshape flat array to 2D grid
           const flatArray = data.thermal_data?.raw_array || [];
-          const reshapedArray = [];
+          const reshapedArray: number[][] = [];
           for (let i = 0; i < 62; i++) {
             reshapedArray.push(flatArray.slice(i * 80, (i + 1) * 80));
           }
@@ -452,38 +496,45 @@ export default function DashboardPage() {
           setThermalData(thermalData);
           setLastUpdate(new Date().toLocaleTimeString("id-ID"));
 
-          // Calculate actual FPS
-          const actualFps =
-            lastFrameTime.current > 0
-              ? Math.round(1000 / (currentTime - lastFrameTime.current))
-              : 0;
-          setFps(Math.min(actualFps, 1)); // Cap at 1 FPS
+          // Calculate FPS
+          fpsCounter.current.push(currentTime);
+          fpsCounter.current = fpsCounter.current.filter(
+            (time) => currentTime - time < 1000
+          );
+          setFps(fpsCounter.current.length);
 
           lastFrameTime.current = currentTime;
         } catch (error) {
-          console.error("Error parsing thermal data:", error);
+          console.error("Dashboard: Error parsing thermal data:", error);
         }
       }
     };
 
+    // Initialize MQTT
+    initializeMQTT();
+
+    // Set up connection checker
+    const connectionInterval = setInterval(checkConnection, 3000);
+
+    // Add message listener
     window.addEventListener("mqttMessage", handleMQTTMessage as EventListener);
 
     return () => {
+      clearInterval(connectionInterval);
       window.removeEventListener(
         "mqttMessage",
         handleMQTTMessage as EventListener
       );
-      mqttClient.disconnect();
     };
-  }, [isPaused]);
+  }, [isPaused, frameInterval, mqttStatus]);
 
   const isLoading = !thermalData;
   const stats = thermalData?.thermal_data.statistics;
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className=" p-6 space-y-8">
-        {/* Clean Header */}
+      <div className="p-6 space-y-8">
+        {/* Header with Controls */}
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <h1 className="text-3xl font-bold text-gray-900">
@@ -494,8 +545,46 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {/* Control Buttons */}
+          {/* Enhanced Control Buttons */}
           <div className="flex items-center gap-3">
+            {/* FPS Control */}
+            <div className="flex items-center gap-2 bg-white border rounded-lg px-3 py-2">
+              <label className="text-sm font-medium text-gray-700">FPS:</label>
+              <select
+                value={frameLimit}
+                onChange={(e) => setFrameLimit(Number(e.target.value))}
+                className="text-sm border-0 bg-transparent focus:ring-0"
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={15}>15</option>
+              </select>
+            </div>
+
+            {/* Auto Reset Toggle */}
+            <button
+              onClick={() => setAutoReset(!autoReset)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                autoReset
+                  ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                  : "bg-gray-100 text-gray-700 border border-gray-200"
+              }`}
+            >
+              Auto Reset {autoReset ? "ON" : "OFF"}
+            </button>
+
+            {/* Manual Reset */}
+            <button
+              onClick={resetFrameCounter}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Reset Frame
+            </button>
+
+            {/* Pause/Resume */}
             <button
               onClick={() => setIsPaused(!isPaused)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
@@ -510,18 +599,6 @@ export default function DashboardPage() {
                 <Pause className="w-4 h-4" />
               )}
               {isPaused ? "Resume" : "Pause"}
-            </button>
-
-            <button
-              onClick={() => {
-                setThermalData(null);
-                setLastUpdate("");
-                lastFrameTime.current = 0;
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium text-sm transition-colors"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Reset
             </button>
 
             <Badge
@@ -572,7 +649,7 @@ export default function DashboardPage() {
           <StatCard
             title="Frame Rate"
             value={`${fps} FPS`}
-            description="Controlled at 1 FPS"
+            description={`Target: ${frameLimit} FPS`}
             icon={<Cpu className="w-4 h-4" />}
             isLoading={false}
           />
@@ -592,6 +669,7 @@ export default function DashboardPage() {
                   <CardDescription className="mt-1">
                     Real-time visualization from{" "}
                     {thermalData?.device_name || "thermal sensor"}
+                    {autoReset && " • Auto reset at frame 100"}
                   </CardDescription>
                 </div>
               </div>

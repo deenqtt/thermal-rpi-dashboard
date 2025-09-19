@@ -1,3 +1,5 @@
+// src/app/settings/page.tsx
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -80,6 +82,11 @@ export default function SettingsPage() {
   const [networkError, setNetworkError] = useState<string>("");
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  // NEW: Redirect state
+  const [redirectCountdown, setRedirectCountdown] = useState<number | null>(
+    null
+  );
+
   // WiFi connection form
   const [wifiForm, setWifiForm] = useState({
     ssid: "",
@@ -113,6 +120,24 @@ export default function SettingsPage() {
 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  };
+
+  // NEW: Redirect helper function
+  const getRedirectURL = (newIP: string) => {
+    const currentURL = new URL(window.location.href);
+    const currentPort = currentURL.port;
+
+    // Detect port - use current port or default
+    let targetPort = currentPort || "3000";
+
+    // Build new URL
+    const portPart =
+      (targetPort === "80" && currentURL.protocol === "http:") ||
+      (targetPort === "443" && currentURL.protocol === "https:")
+        ? ""
+        : `:${targetPort}`;
+
+    return `${currentURL.protocol}//${newIP}${portPart}${currentURL.pathname}`;
   };
 
   useEffect(() => {
@@ -259,6 +284,7 @@ export default function SettingsPage() {
     }
   };
 
+  // ENHANCED: Network response handler dengan auto redirect
   const handleNetworkResponse = (payload: string) => {
     try {
       const response: any = JSON.parse(payload);
@@ -286,11 +312,41 @@ export default function SettingsPage() {
           }
         } else if (response.action === "set_network_config") {
           setNetworkError("");
-          addToast(
-            "success",
-            "Network Updated",
-            `Network configuration applied: ${response.method}`
-          );
+
+          // AUTO REDIRECT LOGIC - NEW
+          if (response.method === "static" && response.static_ip) {
+            const newIP = response.static_ip;
+
+            addToast(
+              "success",
+              "Network Updated",
+              `Static IP configured: ${newIP}. Redirecting...`
+            );
+
+            // Start countdown redirect
+            let countdown = 5;
+            setRedirectCountdown(countdown);
+
+            const countdownInterval = setInterval(() => {
+              countdown--;
+              setRedirectCountdown(countdown);
+
+              if (countdown <= 0) {
+                clearInterval(countdownInterval);
+                setRedirectCountdown(null);
+                const newURL = getRedirectURL(newIP);
+                console.log(`Auto redirecting to: ${newURL}`);
+                window.location.href = newURL;
+              }
+            }, 1000);
+          } else {
+            addToast(
+              "success",
+              "Network Updated",
+              `Network configuration applied: ${response.method}`
+            );
+          }
+
           setTimeout(() => loadNetworkConfig(), 2000);
         }
       } else {
@@ -490,6 +546,50 @@ export default function SettingsPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-8">
+      {/* NEW: Redirect Modal */}
+      {redirectCountdown !== null && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md mx-4">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <RefreshCw className="w-8 h-8 text-blue-600 animate-spin" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Switching to New IP
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Static IP configured successfully.
+                <br />
+                Redirecting to new address...
+              </p>
+              <div className="text-3xl font-bold text-blue-600 mb-2">
+                {redirectCountdown}
+              </div>
+              <p className="text-sm text-gray-500 mb-4">seconds remaining</p>
+              <div className="space-y-2">
+                <Button
+                  onClick={() => {
+                    setRedirectCountdown(null);
+                    const newURL = getRedirectURL(networkForm.static_ip);
+                    window.location.href = newURL;
+                  }}
+                  className="w-full"
+                >
+                  Redirect Now
+                </Button>
+                <Button
+                  onClick={() => setRedirectCountdown(null)}
+                  variant="outline"
+                  className="w-full"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notifications */}
       <div className="fixed top-4 right-4 z-50 space-y-2">
         {toasts.map((toast) => (
@@ -970,7 +1070,7 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {/* Action Buttons - INI YANG KURANG */}
+              {/* Action Buttons */}
               <div className="flex justify-end space-x-2 pt-4">
                 <Button
                   onClick={loadNetworkConfig}

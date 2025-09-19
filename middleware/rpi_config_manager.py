@@ -42,7 +42,10 @@ class RPiConfigManager:
             "wifi_disconnect_response": "rpi/wifi/disconnect_response",
             "wifi_delete": "rpi/wifi/delete",
             "wifi_delete_response": "rpi/wifi/delete_response",
-            "wifi_status": "rpi/wifi/status"
+            "wifi_status": "rpi/wifi/status",
+            "wifi_status_get": "rpi/wifi/status/get",          # Topic baru
+            "wifi_status_response": "rpi/wifi/status/response"  # Topic baru
+            
         }
         
         # Network configuration - detect which system to use
@@ -836,24 +839,43 @@ class RPiConfigManager:
     def scan_wifi(self):
         """Scans for available Wi-Fi networks"""
         self.logger.info("Scanning for Wi-Fi networks...")
-        success, filtered_output = self.run_nmcli_command(['-t', '-f', 'SSID,SECURITY,SIGNAL', 'dev', 'wifi', 'list', '--rescan', 'yes'], 
-                                                         "scan Wi-Fi networks")
+        # Get current connection info for comparison
+        current_status = self.get_wifi_status()
+        current_ssid = None
+        if current_status.get("connected") and current_status.get("current_network"):
+            current_ssid = current_status["current_network"]["ssid"]
+        success, filtered_output = self.run_nmcli_command(['-t', '-f', 'SSID,SECURITY,SIGNAL,FREQ', 'dev', 'wifi', 'list', '--rescan', 'yes'], 
+                                                 "scan Wi-Fi networks")
         if not success:
             return []
         
         wifi_networks = []
+        seen_ssids = set()
+
         for filtered_line in filtered_output.splitlines():
-            parts = filtered_line.split(':', 2)
-            if len(parts) >= 3:
+            parts = filtered_line.split(':', 3)
+            if len(parts) >= 4:
                 ssid = parts[0].strip()
                 security = parts[1].strip()
                 signal = parts[2].strip()
-                if ssid and ssid not in [net['ssid'] for net in wifi_networks]:
-                    wifi_networks.append({
+                frequency = parts[3].strip()
+                
+                if ssid and ssid not in seen_ssids:
+                    seen_ssids.add(ssid)
+                    
+                    network_info = {
                         "ssid": ssid, 
                         "security": security,
-                        "signal": signal
-                    })
+                        "signal": signal,
+                        "frequency": frequency,
+                        "is_current": ssid == current_ssid,
+                        "is_saved": any(saved["ssid"] == ssid for saved in current_status.get("saved_networks", []))
+                    }
+                    
+                    wifi_networks.append(network_info)
+
+        # Sort by signal strength (descending)
+        wifi_networks.sort(key=lambda x: int(x["signal"]) if x["signal"].isdigit() else 0, reverse=True)
         
         self.logger.info(f"Found {len(wifi_networks)} Wi-Fi networks.")
         return wifi_networks
@@ -931,34 +953,88 @@ class RPiConfigManager:
         return True, f"Wi-Fi {ssid} deleted successfully."
 
     def get_wifi_status(self):
-        """Get current WiFi connection status"""
+        """Get comprehensive WiFi status including current connection and saved networks"""
         try:
+            # Get current connection status
             success, output = self.run_nmcli_command(['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device', 'status'], 
                                                     "get device status")
             if not success:
-                return {"connected": False, "ssid": None, "ip": None}
+                return {"connected": False, "current_network": None, "saved_networks": [], "error": output}
 
-            wifi_info = {"connected": False, "ssid": None, "ip": None}
+            wifi_status = {
+                "connected": False, 
+                "current_network": None,
+                "saved_networks": [],
+                "device_state": "unknown"
+            }
             
+            # Check WiFi device status
             for line in output.splitlines():
                 parts = line.split(':')
-                if len(parts) >= 4 and parts[0] == 'wlan0' and parts[2] == 'connected':
-                    wifi_info["connected"] = True
-                    wifi_info["ssid"] = parts[3]
+                if len(parts) >= 4 and parts[0] == 'wlan0':
+                    wifi_status["device_state"] = parts[2]
                     
-                    ip_success, ip_output = self.run_nmcli_command(['device', 'show', 'wlan0'], "get wlan0 IP")
-                    if ip_success:
-                        import re
-                        match = re.search(r"IP4\.ADDRESS\[1\]:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+", ip_output)
-                        if match:
-                            wifi_info["ip"] = match.group(1)
+                    if parts[2] == 'connected' and parts[3]:
+                        wifi_status["connected"] = True
+                        connection_name = parts[3]  # Simpan connection name
+                        
+                        # Get SSID asli dari connection profile
+                        ssid_success, ssid_output = self.run_nmcli_command(['-t', '-f', '802-11-wireless.ssid', 'connection', 'show', connection_name], 
+                                                                        "get real SSID")
+                        current_ssid = connection_name  # fallback
+                        if ssid_success and ssid_output.strip():
+                            for line in ssid_output.splitlines():
+                                if line.startswith('802-11-wireless.ssid:'):
+                                    current_ssid = line.split(':', 1)[1].strip()
+                                    break
+                        
+                        # Get detailed info for current connection
+                        ip_success, ip_output = self.run_nmcli_command(['device', 'show', 'wlan0'], "get wlan0 details")
+                        current_ip = None
+                        signal_strength = None
+                        
+                        if ip_success:
+                            import re
+                            # Extract IP address
+                            ip_match = re.search(r"IP4\.ADDRESS\[1\]:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+", ip_output)
+                            if ip_match:
+                                current_ip = ip_match.group(1)
+                        
+                        # Get signal strength for current connection
+                        signal_success, signal_output = self.run_nmcli_command(['-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi'], 
+                                                                            "get current signal strength")
+                        if signal_success:
+                            for signal_line in signal_output.splitlines():
+                                signal_parts = signal_line.split(':')
+                                if len(signal_parts) >= 2 and signal_parts[0] == current_ssid:
+                                    signal_strength = signal_parts[1]
+                                    break
+                        
+                        wifi_status["current_network"] = {
+                            "ssid": current_ssid,
+                            "ip_address": current_ip,
+                            "signal_strength": signal_strength
+                        }
                     break
             
-            return wifi_info
+            # Get all saved WiFi connections
+            saved_success, saved_output = self.run_nmcli_command(['-t', '-f', 'NAME,TYPE', 'connection', 'show'], 
+                                                                "get saved connections")
+            if saved_success:
+                for line in saved_output.splitlines():
+                    parts = line.split(':')
+                    if len(parts) >= 2 and parts[1] == '802-11-wireless':
+                        wifi_status["saved_networks"].append({
+                            "ssid": parts[0],
+                            "is_current": wifi_status["connected"] and wifi_status["current_network"] and 
+                                        wifi_status["current_network"]["ssid"] == parts[0]
+                        })
+            
+            return wifi_status
             
         except Exception as e:
-            self.logger.error(f"Error getting WiFi status: {e}")
-            return {"connected": False, "ssid": None, "ip": None, "error": str(e)}
+            self.logger.error(f"Error getting comprehensive WiFi status: {e}")
+            return {"connected": False, "current_network": None, "saved_networks": [], "error": str(e)}
     
     # --- MQTT Setup and Handlers ---
     
@@ -984,7 +1060,13 @@ class RPiConfigManager:
         if rc == 0:
             self.logger.info("MQTT connected successfully")
             
-            for topic_key in ["get", "set", "network_get", "network_set", "wifi_scan", "wifi_connect", "wifi_disconnect", "wifi_delete"]:
+            topics_to_subscribe = [
+                "get", "set", "network_get", "network_set", 
+                "wifi_scan", "wifi_connect", "wifi_disconnect", "wifi_delete",
+                "wifi_status_get"  # Tambah topic baru
+            ]
+
+            for topic_key in topics_to_subscribe:
                 client.subscribe(self.topics[topic_key])
             
             self.logger.info("Subscribed to all configuration topics")
@@ -1016,6 +1098,8 @@ class RPiConfigManager:
                 self._handle_wifi_disconnect()
             elif topic == self.topics["wifi_delete"]:
                 self._handle_wifi_delete(payload_str)
+            elif topic == self.topics["wifi_status_get"]:  # Handler baru
+                self._handle_wifi_status_get()
                 
         except Exception as e:
             self.logger.error(f"Error handling message: {e}")
@@ -1289,6 +1373,37 @@ class RPiConfigManager:
                 "error": str(e)
             })
     
+
+    def _handle_wifi_status_get(self):
+        """Handle WiFi status get request - NEW HANDLER"""
+        try:
+            self.logger.info("Received WiFi status get request")
+            wifi_status = self.get_wifi_status()
+            
+            response_data = {
+                "action": "wifi_status_get",
+                "status": "success",
+                "timestamp": datetime.now().isoformat(),
+                "wifi_status": wifi_status
+            }
+            
+            # Add error to response if present
+            if "error" in wifi_status:
+                response_data["status"] = "partial_error"
+                response_data["error_details"] = wifi_status["error"]
+            
+            self._publish_wifi_status_response(response_data)
+            self.logger.info(f"WiFi status sent: Connected={wifi_status.get('connected', False)}")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling WiFi status request: {e}")
+            self._publish_wifi_status_response({
+                "action": "wifi_status_get",
+                "status": "error",
+                "timestamp": datetime.now().isoformat(),
+                "error": str(e)
+            })
+   
     def _restart_thermal_service(self):
         """Restart thermal service"""
         try:
@@ -1362,6 +1477,26 @@ class RPiConfigManager:
         except Exception as e:
             self.logger.error(f"Error publishing WiFi response: {e}")
     
+
+    def _publish_wifi_status_response(self, data):
+        """Publish WiFi status response - NEW FUNCTION"""
+        try:
+            response = {
+                "timestamp": datetime.now().isoformat(),
+                "device_id": self.device_id,
+                **data
+            }
+            
+            self.mqtt_client.publish(
+                self.topics["wifi_status_response"],
+                json.dumps(response),
+                qos=1
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error publishing WiFi status response: {e}")
+
+
     def start(self):
         """Start config manager"""
         self.logger.info("Starting RPi Config Manager with Network Management...")
