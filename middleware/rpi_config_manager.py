@@ -12,6 +12,46 @@ from datetime import datetime
 from pathlib import Path
 import paho.mqtt.client as mqtt
 
+# Import library gpiozero
+from gpiozero import Button
+from signal import pause
+
+class ButtonHandler:
+    def __init__(self, manager, gpio_pin=26):
+        self.manager = manager
+        # Inisialisasi tombol dengan pull-up internal
+        self.reset_button = Button(gpio_pin, pull_up=True, bounce_time=0.1)
+        self.start_time = 0
+        self.reboot_threshold = 5  # detik
+        self.factory_reset_threshold = 10  # detik
+        self.logger = logging.getLogger('ButtonHandler')
+        
+    def _button_pressed(self):
+        """Fungsi yang dipanggil saat tombol ditekan."""
+        self.start_time = time.time()
+        self.logger.info("Tombol ditekan...")
+
+    def _button_released(self):
+        """Fungsi yang dipanggil saat tombol dilepas."""
+        end_time = time.time()
+        duration = end_time - self.start_time
+        self.logger.info(f"Tombol dilepas. Durasi penekanan: {duration:.2f} detik")
+
+        if duration >= self.factory_reset_threshold:
+            self.logger.warning("Durasi > 10 detik. Memulai Factory Reset...")
+            self.manager.factory_reset()
+        elif duration >= self.reboot_threshold:
+            self.logger.warning("Durasi > 5 detik. Memulai Reboot...")
+            self.manager.reboot_system()
+        else:
+            self.logger.info("Durasi < 5 detik. Tidak ada tindakan yang diambil.")
+            
+    def start(self):
+        """Memulai pemantauan tombol."""
+        self.reset_button.when_pressed = self._button_pressed
+        self.reset_button.when_released = self._button_released
+        self.logger.info("Pemantauan tombol reset dimulai di GPIO26.")
+
 class RPiConfigManager:
     def __init__(self, config_path="/home/containment/thermal_mqtt_project/config/mqtt_config.json"):
         self.config_path = config_path
@@ -43,9 +83,11 @@ class RPiConfigManager:
             "wifi_delete": "rpi/wifi/delete",
             "wifi_delete_response": "rpi/wifi/delete_response",
             "wifi_status": "rpi/wifi/status",
-            "wifi_status_get": "rpi/wifi/status/get",          # Topic baru
-            "wifi_status_response": "rpi/wifi/status/response"  # Topic baru
-            
+            "wifi_status_get": "rpi/wifi/status/get",
+            "wifi_status_response": "rpi/wifi/status/response",
+            # Topik baru untuk Reboot dan Factory Reset
+            "reboot_request": "rpi/system/reboot",
+            "factory_reset_request": "rpi/system/factory_reset"
         }
         
         # Network configuration - detect which system to use
@@ -67,6 +109,9 @@ class RPiConfigManager:
         self.load_config()
         
         self.logger.info(f"RPi Config Manager initialized (network method: {self.network_method})")
+        
+        # Inisialisasi ButtonHandler
+        self.button_handler = ButtonHandler(self)
     
     def _setup_logging(self):
         """Setup logging"""
@@ -1036,6 +1081,58 @@ class RPiConfigManager:
             self.logger.error(f"Error getting comprehensive WiFi status: {e}")
             return {"connected": False, "current_network": None, "saved_networks": [], "error": str(e)}
     
+    # --- System Control Functions (Baru) ---
+    
+    def reboot_system(self):
+        """Memulai proses reboot sistem."""
+        self.logger.warning("Memulai reboot sistem...")
+        self._publish_response("success", {"message": "Rebooting system..."})
+        time.sleep(2)
+        os.system("sudo reboot")
+
+    def factory_reset(self):
+        """Memulai proses factory reset."""
+        self.logger.critical("Memulai factory reset...")
+        self._publish_response("warning", {"message": "Initiating factory reset..."})
+        
+        # Contoh implementasi factory reset:
+        # 1. Hapus semua konfigurasi Wi-Fi yang disimpan.
+        #    Ini akan memaksa perangkat untuk terhubung ke jaringan secara manual lagi.
+        self._delete_all_wifi_connections()
+
+        # 2. Hapus file konfigurasi utama.
+        try:
+            if os.path.exists(self.config_path):
+                os.remove(self.config_path)
+                self.logger.info(f"File konfigurasi utama dihapus: {self.config_path}")
+        except Exception as e:
+            self.logger.error(f"Gagal menghapus file konfigurasi: {e}")
+
+        # 3. Reboot sistem untuk menerapkan perubahan.
+        time.sleep(5)
+        self.reboot_system()
+
+    def _delete_all_wifi_connections(self):
+        """Menghapus semua koneksi Wi-Fi yang tersimpan."""
+        try:
+            success, output = self.run_nmcli_command(['-t', '-f', 'UUID,NAME,TYPE', 'connection', 'show'],
+                                                     "fetch all connections")
+            if not success:
+                self.logger.error(f"Gagal menghapus koneksi Wi-Fi: {output}")
+                return
+
+            for line in output.splitlines():
+                parts = line.split(':')
+                if len(parts) >= 3 and parts[2] == '802-11-wireless':
+                    uuid_to_delete = parts[0]
+                    ssid_name = parts[1]
+                    self.logger.info(f"Menghapus koneksi Wi-Fi: {ssid_name} ({uuid_to_delete})")
+                    self.run_nmcli_command(['connection', 'delete', 'uuid', uuid_to_delete], 
+                                           f"delete Wi-Fi connection '{ssid_name}'")
+            self.logger.info("Semua koneksi Wi-Fi yang tersimpan telah dihapus.")
+        except Exception as e:
+            self.logger.error(f"Gagal menghapus semua koneksi Wi-Fi: {e}")
+    
     # --- MQTT Setup and Handlers ---
     
     def setup_mqtt(self):
@@ -1063,7 +1160,9 @@ class RPiConfigManager:
             topics_to_subscribe = [
                 "get", "set", "network_get", "network_set", 
                 "wifi_scan", "wifi_connect", "wifi_disconnect", "wifi_delete",
-                "wifi_status_get"  # Tambah topic baru
+                "wifi_status_get",
+                "reboot_request",   # Topik baru
+                "factory_reset_request"  # Topik baru
             ]
 
             for topic_key in topics_to_subscribe:
@@ -1098,8 +1197,12 @@ class RPiConfigManager:
                 self._handle_wifi_disconnect()
             elif topic == self.topics["wifi_delete"]:
                 self._handle_wifi_delete(payload_str)
-            elif topic == self.topics["wifi_status_get"]:  # Handler baru
+            elif topic == self.topics["wifi_status_get"]:
                 self._handle_wifi_status_get()
+            elif topic == self.topics["reboot_request"]:
+                self.reboot_system()
+            elif topic == self.topics["factory_reset_request"]:
+                self.factory_reset()
                 
         except Exception as e:
             self.logger.error(f"Error handling message: {e}")
@@ -1500,6 +1603,9 @@ class RPiConfigManager:
     def start(self):
         """Start config manager"""
         self.logger.info("Starting RPi Config Manager with Network Management...")
+        
+        # Mulai pemantauan tombol
+        self.button_handler.start()
         
         if not self.setup_mqtt():
             self.logger.error("Failed to setup MQTT")

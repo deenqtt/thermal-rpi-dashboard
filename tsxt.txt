@@ -1,0 +1,1 @@
+GPIO26, diatas 10 detik reset factory, diatas  5 detik reboot

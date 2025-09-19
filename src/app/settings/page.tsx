@@ -157,6 +157,8 @@ export default function SettingsPage() {
         handleWiFiDisconnectResponse(payload);
       } else if (topic === "rpi/wifi/delete_response") {
         handleWiFiDeleteResponse(payload);
+      } else if (topic === "rpi/system/response") {
+        handleSystemResponse(payload);
       }
     };
 
@@ -240,6 +242,21 @@ export default function SettingsPage() {
       console.log(`Deleting WiFi: ${ssid}`);
       setSaving(true);
       mqttClient.publish("rpi/wifi/delete", JSON.stringify({ ssid }));
+    }
+  };
+  const rebootDevice = () => {
+    if (connected) {
+      console.log("Sending reboot command...");
+      mqttClient.publish("rpi/system/reboot", "{}");
+      addToast("info", "Reboot", "Reboot command sent to device");
+    }
+  };
+
+  const resetFactory = () => {
+    if (connected) {
+      console.log("Sending factory reset command...");
+      mqttClient.publish("rpi/system/factory_reset", "{}");
+      addToast("info", "Factory Reset", "Factory reset command sent to device");
     }
   };
 
@@ -460,6 +477,23 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSystemResponse = (payload: string) => {
+    try {
+      const response: any = JSON.parse(payload);
+      if (response.status === "success") {
+        addToast(
+          "success",
+          "System",
+          response.message || "Operation successful"
+        );
+      } else {
+        addToast("error", "System Error", response.error || "Operation failed");
+      }
+    } catch (error) {
+      addToast("error", "System Error", "Failed to parse system response");
+    }
+  };
+
   // Auto-retry loading
   useEffect(() => {
     if (connected && !config) {
@@ -672,7 +706,7 @@ export default function SettingsPage() {
 
       {/* Configuration Tabs */}
       <Tabs defaultValue="device" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="device" className="flex items-center gap-2">
             <Database className="w-4 h-4" />
             Device
@@ -692,6 +726,10 @@ export default function SettingsPage() {
           <TabsTrigger value="thermal" className="flex items-center gap-2">
             <Thermometer className="w-4 h-4" />
             Thermal
+          </TabsTrigger>
+          <TabsTrigger value="system" className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" />
+            System
           </TabsTrigger>
         </TabsList>
 
@@ -1356,6 +1394,32 @@ export default function SettingsPage() {
                   </div>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="system" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <RefreshCw className="w-5 h-5" />
+                System Control
+              </CardTitle>
+              <CardDescription>Manage system-level operations</CardDescription>
+            </CardHeader>
+            <CardContent className="flex space-x-2">
+              <Button onClick={rebootDevice} disabled={!connected || saving}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Reboot
+              </Button>
+              <Button
+                onClick={resetFactory}
+                disabled={!connected || saving}
+                variant="destructive"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Factory Reset
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

@@ -19,6 +19,12 @@ class ThermalMQTTPublisher:
         self.mqtt_client = None
         self.mqtt_client_local = None # Client for localhost
         
+        # Frame counting with reset
+        self.frame_count = 0          # Cycling counter (0-99)
+        self.total_frame_count = 0    # Total frames processed
+        self.cycle_count = 0          # How many cycles completed
+        self.frame_reset_limit = 100  # Reset every 100 frames
+        
         # Setup logging
         self._setup_logging()
         self.logger = logging.getLogger('thermal_mqtt_publisher')
@@ -58,6 +64,20 @@ class ThermalMQTTPublisher:
         """Handle shutdown signals"""
         self.logger.info(f"Received signal {signum}, shutting down gracefully...")
         self.stop()
+    
+    def _update_frame_counters(self):
+        """Update frame counters with reset logic"""
+        self.total_frame_count += 1
+        self.frame_count += 1
+        
+        # Reset frame counter every 100 frames
+        if self.frame_count >= self.frame_reset_limit:
+            self.cycle_count += 1
+            self.frame_count = 0
+            self.logger.info(
+                f"Frame counter reset - Cycle #{self.cycle_count} completed "
+                f"(Total frames: {self.total_frame_count})"
+            )
     
     def _setup_mqtt(self):
         """Setup MQTT clients for both primary and local brokers"""
@@ -123,7 +143,12 @@ class ThermalMQTTPublisher:
             "device_id": self.config['device']['device_id'],
             "status": status,
             "timestamp": datetime.now().isoformat(),
-            "interface": self.thermal.interface if self.thermal else "unknown"
+            "interface": self.thermal.interface if self.thermal else "unknown",
+            "frame_info": {
+                "current_frame": self.frame_count,
+                "total_frames": self.total_frame_count,
+                "cycle": self.cycle_count
+            }
         }
         payload_json = json.dumps(status_payload)
         
@@ -144,8 +169,12 @@ class ThermalMQTTPublisher:
             self.logger.error(f"Failed to publish device status to local broker: {e}")
 
     def _publish_thermal_data(self, frame_data, stats):
-        """Publish thermal data to both MQTT brokers"""
+        """Publish thermal data to both MQTT brokers with frame counter reset"""
         try:
+            # Update frame counters
+            self._update_frame_counters()
+            
+            # === SAME PAYLOAD for BOTH BROKERS (raw data included) ===
             payload = {
                 "timestamp": datetime.now().isoformat(),
                 "device_id": self.config['device']['device_id'],
@@ -155,7 +184,9 @@ class ThermalMQTTPublisher:
                 "thermal_data": {
                     "raw_array": frame_data.tolist() if hasattr(frame_data, 'tolist') else list(frame_data),
                     "statistics": stats,
-                    "frame_count": getattr(self, 'frame_count', 0)
+                    "frame_count": self.frame_count,      # 0-99 cycling
+                    "cycle": self.cycle_count,            # How many resets
+                    "total_frames": self.total_frame_count # Total frames
                 },
                 "metadata": {
                     "sensor_type": "waveshare_thermal_camera_hat",
@@ -163,6 +194,7 @@ class ThermalMQTTPublisher:
                     "units": "celsius"
                 }
             }
+            
             payload_json = json.dumps(payload)
             
             # --- Publish to primary broker ---
@@ -170,14 +202,24 @@ class ThermalMQTTPublisher:
                 self.config['topic'], payload_json, qos=self.config['mqtt']['qos']
             )
             
-            # --- Publish to local broker ---
+            # --- Publish to local broker (SAME DATA) ---
             result_local = self.mqtt_client_local.publish(
                 "sensors/thermal_stream", payload_json, qos=1
             )
             
             if result_primary.rc == mqtt.MQTT_ERR_SUCCESS and result_local.rc == mqtt.MQTT_ERR_SUCCESS:
-                self.logger.debug("Thermal data published successfully to both brokers")
-                self.frame_count = getattr(self, 'frame_count', 0) + 1
+                self.logger.debug(f"Frame {self.frame_count} (raw data included) published successfully to both brokers")
+                
+                # Log every 60 frames with cycle info
+                if self.total_frame_count % 60 == 0:
+                    payload_size = len(payload_json)
+                    self.logger.info(
+                        f"Frame {self.frame_count} (Cycle {self.cycle_count}, Total: {self.total_frame_count}): "
+                        f"Temp range: {stats['min_temp']:.1f}°C - {stats['max_temp']:.1f}°C, "
+                        f"Avg: {stats['avg_temp']:.1f}°C, "
+                        f"Interface: {self.thermal.interface}, "
+                        f"Payload size: {payload_size}B"
+                    )
             else:
                 self.logger.warning(f"MQTT publish failed! Primary_rc: {result_primary.rc}, Local_rc: {result_local.rc}")
                 
@@ -190,7 +232,12 @@ class ThermalMQTTPublisher:
             "device_id": self.config['device']['device_id'],
             "timestamp": datetime.now().isoformat(),
             "error": error_msg,
-            "interface": self.thermal.interface if self.thermal else "unknown"
+            "interface": self.thermal.interface if self.thermal else "unknown",
+            "frame_info": {
+                "current_frame": self.frame_count,
+                "total_frames": self.total_frame_count,
+                "cycle": self.cycle_count
+            }
         }
         payload_json = json.dumps(error_payload)
 
@@ -208,9 +255,18 @@ class ThermalMQTTPublisher:
         except Exception as e:
             self.logger.error(f"Failed to publish error to local broker: {e}")
 
+    def get_frame_stats(self):
+        """Get current frame statistics"""
+        return {
+            "current_frame": self.frame_count,
+            "total_frames": self.total_frame_count,
+            "cycle": self.cycle_count,
+            "reset_limit": self.frame_reset_limit
+        }
+
     def start(self):
         """Start the thermal MQTT publisher"""
-        self.logger.info("Starting Thermal MQTT Publisher...")
+        self.logger.info("Starting Thermal MQTT Publisher with optimized frame counting...")
         
         if not self._setup_mqtt():
             self.logger.error("Failed to setup MQTT, exiting")
@@ -224,9 +280,9 @@ class ThermalMQTTPublisher:
             return False
         
         self.logger.info(f"Thermal sensor initialized with {self.thermal.interface} interface")
+        self.logger.info(f"Frame counter will reset every {self.frame_reset_limit} frames")
         
         self.running = True
-        self.frame_count = 0
         error_count = 0
         max_errors = 10
         
@@ -238,13 +294,6 @@ class ThermalMQTTPublisher:
                         stats = self.thermal.get_thermal_stats(frame_data)
                         if stats:
                             self._publish_thermal_data(frame_data, stats)
-                            if self.frame_count % 60 == 0:
-                                self.logger.info(
-                                    f"Frame {self.frame_count}: "
-                                    f"Temp range: {stats['min_temp']:.1f}°C - {stats['max_temp']:.1f}°C, "
-                                    f"Avg: {stats['avg_temp']:.1f}°C, "
-                                    f"Interface: {self.thermal.interface}"
-                                )
                             error_count = 0
                         else:
                             raise Exception("Failed to calculate thermal statistics")
@@ -283,6 +332,10 @@ class ThermalMQTTPublisher:
         self.logger.info("Stopping Thermal MQTT Publisher...")
         self.running = False
         
+        # Log final statistics
+        final_stats = self.get_frame_stats()
+        self.logger.info(f"Final frame statistics: {final_stats}")
+        
         if self.mqtt_client and self.mqtt_client.is_connected():
             self._publish_device_status("offline")
             time.sleep(1)
@@ -303,11 +356,17 @@ class ThermalMQTTPublisher:
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description='Thermal Camera MQTT Publisher')
+    parser = argparse.ArgumentParser(description='Thermal Camera MQTT Publisher with Frame Counter Reset')
     parser.add_argument(
         '--config', 
         default='/home/containment/thermal_mqtt_project/config/mqtt_config.json',
         help='Path to configuration file'
+    )
+    parser.add_argument(
+        '--reset-limit',
+        type=int,
+        default=100,
+        help='Number of frames before counter reset (default: 100)'
     )
     
     args = parser.parse_args()
@@ -317,6 +376,12 @@ def main():
         sys.exit(1)
     
     publisher = ThermalMQTTPublisher(args.config)
+    
+    # Set custom reset limit if provided
+    if args.reset_limit != 100:
+        publisher.frame_reset_limit = args.reset_limit
+        print(f"Frame counter reset limit set to: {args.reset_limit}")
+    
     publisher.start()
 
 if __name__ == "__main__":
