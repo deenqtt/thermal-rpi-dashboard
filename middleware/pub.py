@@ -169,7 +169,7 @@ class ThermalMQTTPublisher:
             self.logger.error(f"Failed to publish device status to local broker: {e}")
 
     def _publish_thermal_data(self, frame_data, stats):
-        """Publish thermal data to both MQTT brokers with frame counter reset"""
+        """Publish thermal data to both MQTT brokers with dynamic topic from config"""
         try:
             # Update frame counters
             self._update_frame_counters()
@@ -197,26 +197,32 @@ class ThermalMQTTPublisher:
             
             payload_json = json.dumps(payload)
             
-            # --- Publish to primary broker ---
+            # --- DYNAMIC TOPIC dari config (bukan hardcode) ---
+            primary_topic = self.config['topic']  # Dibaca dari mqtt_config.json
+            
+            # --- Publish to primary broker (menggunakan topic dari config) ---
             result_primary = self.mqtt_client.publish(
-                self.config['topic'], payload_json, qos=self.config['mqtt']['qos']
+                primary_topic, payload_json, qos=self.config['mqtt']['qos']
             )
             
-            # --- Publish to local broker (SAME DATA) ---
+            # --- Publish to local broker (topic pattern dengan device_id) ---
+            local_topic = f"sensors/thermal_stream/{self.config['device']['device_id']}"
             result_local = self.mqtt_client_local.publish(
-                "sensors/thermal_stream", payload_json, qos=1
+                local_topic, payload_json, qos=1
             )
             
             if result_primary.rc == mqtt.MQTT_ERR_SUCCESS and result_local.rc == mqtt.MQTT_ERR_SUCCESS:
-                self.logger.debug(f"Frame {self.frame_count} (raw data included) published successfully to both brokers")
+                self.logger.debug(f"Frame {self.frame_count} published to: {primary_topic} & {local_topic}")
                 
-                # Log every 60 frames with cycle info
+                # Log every 60 frames with topic info
                 if self.total_frame_count % 60 == 0:
                     payload_size = len(payload_json)
                     self.logger.info(
                         f"Frame {self.frame_count} (Cycle {self.cycle_count}, Total: {self.total_frame_count}): "
                         f"Temp range: {stats['min_temp']:.1f}°C - {stats['max_temp']:.1f}°C, "
                         f"Avg: {stats['avg_temp']:.1f}°C, "
+                        f"Primary Topic: {primary_topic}, "
+                        f"Local Topic: {local_topic}, "
                         f"Interface: {self.thermal.interface}, "
                         f"Payload size: {payload_size}B"
                     )

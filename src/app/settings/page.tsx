@@ -732,7 +732,6 @@ export default function SettingsPage() {
             System
           </TabsTrigger>
         </TabsList>
-
         {/* Device Configuration */}
         <TabsContent value="device" className="space-y-6">
           {error && (
@@ -825,7 +824,6 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
-
         {/* MQTT Configuration */}
         <TabsContent value="mqtt" className="space-y-6">
           <Card>
@@ -870,6 +868,219 @@ export default function SettingsPage() {
                         disabled={saving}
                       />
                     </div>
+                  </div>
+
+                  {/* MQTT Topic Field dengan Templates dan Validation */}
+                  <div className="space-y-3">
+                    <Label htmlFor="topic">MQTT Topic</Label>
+
+                    <div className="space-y-2">
+                      <Input
+                        id="topic"
+                        value={config.topic}
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            topic: e.target.value,
+                          })
+                        }
+                        placeholder="sensors/thermal_cam_rpi/data"
+                        disabled={saving}
+                        className="font-mono"
+                      />
+
+                      {/* Topic Validation */}
+                      {config.topic && (
+                        <div
+                          className={`text-xs p-2 rounded-md ${
+                            /^[a-zA-Z0-9/_-]+\/[a-zA-Z0-9/_-]+\/[a-zA-Z0-9/_-]+$/.test(
+                              config.topic
+                            )
+                              ? "bg-green-50 text-green-700 border border-green-200"
+                              : "bg-yellow-50 text-yellow-700 border border-yellow-200"
+                          }`}
+                        >
+                          {/^[a-zA-Z0-9/_-]+\/[a-zA-Z0-9/_-]+\/[a-zA-Z0-9/_-]+$/.test(
+                            config.topic
+                          )
+                            ? "✓ Valid topic format"
+                            : "⚠ Recommended: use 3+ level topics (e.g., category/device/data)"}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Topic Templates */}
+                    <div className="bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                      <Label className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-3 block">
+                        Topic Pattern Templates
+                      </Label>
+
+                      {/* Template Categories */}
+                      <div className="space-y-3">
+                        {/* Standard Templates */}
+                        <div>
+                          <div className="text-xs font-medium text-blue-800 dark:text-blue-200 mb-2">
+                            Standard Patterns:
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-mono bg-white dark:bg-slate-800"
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  topic: "sensors/thermal_cam_rpi/data",
+                                })
+                              }
+                            >
+                              sensors/thermal_cam_rpi/data
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-mono bg-white dark:bg-slate-800"
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  topic: "sensors/thermal_stream/001",
+                                })
+                              }
+                            >
+                              sensors/thermal_stream/001
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Factory Templates */}
+                        <div>
+                          <div className="text-xs font-medium text-blue-800 dark:text-blue-200 mb-2">
+                            Factory/Industrial:
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-mono bg-white dark:bg-slate-800"
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  topic: "factory/thermal/zone1/data",
+                                })
+                              }
+                            >
+                              factory/thermal/zone1/data
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-mono bg-white dark:bg-slate-800"
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  topic: "factory/line1/thermal/data",
+                                })
+                              }
+                            >
+                              factory/line1/thermal/data
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-mono bg-white dark:bg-slate-800"
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  topic: "warehouse/thermal/gate/data",
+                                })
+                              }
+                            >
+                              warehouse/thermal/gate/data
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Building/HVAC Templates */}
+                        <div>
+                          <div className="text-xs font-medium text-blue-800 dark:text-blue-200 mb-2">
+                            Building/HVAC:
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-mono bg-white dark:bg-slate-800"
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  topic: "building/hvac/thermal/data",
+                                })
+                              }
+                            >
+                              building/hvac/thermal/data
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-mono bg-white dark:bg-slate-800"
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  topic: "office/floor2/thermal/data",
+                                })
+                              }
+                            >
+                              office/floor2/thermal/data
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Discovery Info */}
+                      <div className="mt-4 p-3 bg-blue-100 dark:bg-blue-900/50 rounded-md">
+                        <div className="text-xs font-medium text-blue-900 dark:text-blue-100 mb-2">
+                          Auto-Discovery Patterns:
+                        </div>
+                        <div className="text-xs text-blue-700 dark:text-blue-300 space-y-1 font-mono">
+                          <div>• sensors/thermal_stream/+</div>
+                          <div>• +/thermal/+/data</div>
+                          <div>• factory/+/thermal/data</div>
+                          <div>• warehouse/+/thermal/data</div>
+                        </div>
+                        <div className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                          Listener akan otomatis mendeteksi thermal devices yang
+                          menggunakan patterns di atas.
+                        </div>
+                      </div>
+
+                      {/* Custom Pattern Builder */}
+                      <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-md">
+                        <div className="text-xs font-medium text-gray-900 dark:text-gray-100 mb-2">
+                          Custom Pattern Builder:
+                        </div>
+                        <div className="text-xs text-gray-700 dark:text-gray-300">
+                          <div className="font-mono mb-1">
+                            {"{location}"}/thermal/{"{device}"}/data
+                          </div>
+                          <div>
+                            Examples: office/thermal/cam1/data,
+                            lab/thermal/sensor2/data
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Topic where thermal data will be published. Use templates
+                      above or create custom pattern.
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -955,7 +1166,6 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
-
         {/* Network Configuration */}
         <TabsContent value="network" className="space-y-6">
           {networkError && (
@@ -1135,7 +1345,6 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
-
         {/* WiFi Configuration */}
         <TabsContent value="wifi" className="space-y-6">
           <div className="grid gap-6 lg:grid-cols-2">
@@ -1352,7 +1561,6 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
-
         {/* Thermal Configuration */}
         <TabsContent value="thermal" className="space-y-6">
           <Card>
@@ -1397,7 +1605,6 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="system" className="space-y-6">
           <Card>
             <CardHeader>

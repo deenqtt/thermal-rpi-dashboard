@@ -1091,48 +1091,125 @@ class RPiConfigManager:
         os.system("sudo reboot")
 
     def factory_reset(self):
-        """Memulai proses factory reset."""
+        """Memulai proses factory reset dengan konfigurasi default."""
         self.logger.critical("Memulai factory reset...")
         self._publish_response("warning", {"message": "Initiating factory reset..."})
         
-        # Contoh implementasi factory reset:
-        # 1. Hapus semua konfigurasi Wi-Fi yang disimpan.
-        #    Ini akan memaksa perangkat untuk terhubung ke jaringan secara manual lagi.
-        self._delete_all_wifi_connections()
-
-        # 2. Hapus file konfigurasi utama.
         try:
+            # 1. Reset IP static eth0 ke 192.168.0.92
+            self.logger.info("Resetting ethernet to static IP 192.168.0.92...")
+            success, message = self.set_static_ip(
+                interface="eth0",
+                ip="192.168.0.92",
+                netmask="255.255.255.0", 
+                gateway="192.168.0.1",
+                dns="8.8.8.8 8.8.4.4"
+            )
+            
+            if success:
+                self.logger.info("Ethernet IP reset to 192.168.0.92 successfully")
+            else:
+                self.logger.error(f"Failed to reset ethernet IP: {message}")
+
+            # 2. Reset config/mqtt_config.json ke default
+            self.logger.info("Resetting MQTT configuration to default...")
+            default_config = {
+                "mqtt": {
+                    "broker_host": "127.0.0.1",
+                    "broker_port": 1883,
+                    "username": None,
+                    "password": None,
+                    "keepalive": 60,
+                    "qos": 1
+                },
+                "device": {
+                    "device_id": "thermal_cam_rpi",
+                    "device_name": "Thermal Camera",
+                    "location": "Room A"
+                },
+                "topic": "sensors/thermal_cam_rpi/data",
+                "publishing": {
+                    "interval": 1
+                },
+                "thermal": {
+                    "interface": "usb",
+                    "spi_device": "/dev/spidev0.0",
+                    "i2c_addr": "0x40",
+                    "usb_device": "/dev/ttyUSB0",
+                    "senxor_path": "/home/containment/pysenxor-master",
+                    "auto_detect": True
+                }
+            }
+            
+            # Backup config lama sebelum reset
             if os.path.exists(self.config_path):
-                os.remove(self.config_path)
-                self.logger.info(f"File konfigurasi utama dihapus: {self.config_path}")
+                backup_path = f"{self.config_path}.factory_backup.{int(time.time())}"
+                shutil.copy2(self.config_path, backup_path)
+                self.logger.info(f"Old config backed up to: {backup_path}")
+            
+            # Tulis konfigurasi default
+            self.config = default_config
+            config_success = self.save_config()
+            
+            if config_success:
+                self.logger.info("MQTT configuration reset to default successfully")
+            else:
+                self.logger.error("Failed to reset MQTT configuration")
+
+            # 3. Publish status update
+            self._publish_response("success", {
+                "message": "Factory reset completed. System will reboot...",
+                "ethernet_reset": success,
+                "config_reset": config_success,
+                "new_ip": "192.168.0.92",
+                "backup_created": os.path.exists(backup_path) if 'backup_path' in locals() else False
+            })
+
+            # 4. Restart thermal service untuk apply config baru
+            self.logger.info("Restarting thermal service...")
+            self._restart_thermal_service()
+
+            # 5. Reboot sistem untuk menerapkan semua perubahan
+            self.logger.info("Factory reset completed. Rebooting system in 3 seconds...")
+            time.sleep(3)
+            self.reboot_system()
+
         except Exception as e:
-            self.logger.error(f"Gagal menghapus file konfigurasi: {e}")
+            self.logger.error(f"Error during factory reset: {e}")
+            self._publish_response("error", {
+                "message": "Factory reset failed",
+                "error": str(e)
+            })
 
-        # 3. Reboot sistem untuk menerapkan perubahan.
-        time.sleep(5)
-        self.reboot_system()
-
-    def _delete_all_wifi_connections(self):
-        """Menghapus semua koneksi Wi-Fi yang tersimpan."""
-        try:
-            success, output = self.run_nmcli_command(['-t', '-f', 'UUID,NAME,TYPE', 'connection', 'show'],
-                                                     "fetch all connections")
-            if not success:
-                self.logger.error(f"Gagal menghapus koneksi Wi-Fi: {output}")
-                return
-
-            for line in output.splitlines():
-                parts = line.split(':')
-                if len(parts) >= 3 and parts[2] == '802-11-wireless':
-                    uuid_to_delete = parts[0]
-                    ssid_name = parts[1]
-                    self.logger.info(f"Menghapus koneksi Wi-Fi: {ssid_name} ({uuid_to_delete})")
-                    self.run_nmcli_command(['connection', 'delete', 'uuid', uuid_to_delete], 
-                                           f"delete Wi-Fi connection '{ssid_name}'")
-            self.logger.info("Semua koneksi Wi-Fi yang tersimpan telah dihapus.")
-        except Exception as e:
-            self.logger.error(f"Gagal menghapus semua koneksi Wi-Fi: {e}")
-    
+    def _create_default_config(self):
+        """Helper function untuk membuat default config (optional)"""
+        return {
+            "mqtt": {
+                "broker_host": "127.0.0.1",
+                "broker_port": 1883,
+                "username": None,
+                "password": None,
+                "keepalive": 60,
+                "qos": 1
+            },
+            "device": {
+                "device_id": "thermal_cam_rpi",
+                "device_name": "Thermal Camera",
+                "location": "Room A"
+            },
+            "topic": "sensors/thermal_cam_rpi/data",
+            "publishing": {
+                "interval": 1
+            },
+            "thermal": {
+                "interface": "usb",
+                "spi_device": "/dev/spidev0.0",
+                "i2c_addr": "0x40",
+                "usb_device": "/dev/ttyUSB0",
+                "senxor_path": "/home/containment/pysenxor-master",
+                "auto_detect": True
+            }
+        }
     # --- MQTT Setup and Handlers ---
     
     def setup_mqtt(self):
