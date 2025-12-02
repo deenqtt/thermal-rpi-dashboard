@@ -206,7 +206,7 @@ class ThermalMQTTPublisher:
             )
             
             # --- Publish to local broker (topic pattern dengan device_id) ---
-            local_topic = f"sensors/thermal_stream/{self.config['device']['device_id']}"
+            local_topic = f"sensors/thermal_stream"
             result_local = self.mqtt_client_local.publish(
                 local_topic, payload_json, qos=1
             )
